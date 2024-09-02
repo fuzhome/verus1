@@ -1,68 +1,79 @@
 import streamlit as st
 import ollama
+import json
 import os
 
-# Function to list available models
+# Function to list models
 def list_models():
-    return [
-        'llama3.1', 'gemma2', 'mistral-nemo', 'mistral-large', 'qwen2',
-        'deepseek-coder-v2', 'phi3', 'mistral', 'mixtral', 'codegemma',
-        'command-r', 'command-r-plus', 'llava', 'llama3', 'gemma',
-        'qwen', 'llama2', 'codellama', 'nomic-embed-text', 'dolphin-mixtral',
-        'phi', 'llama2-uncensored'
-    ]
+    return ollama.list()
 
-# Function to load models
-def load_model(model_name):
-    os.system(f"ollama run {model_name} --download")
-    st.success(f"Model '{model_name}' downloaded successfully.")
+# Function to download a model
+def download_model(model_name):
+    ollama.pull(model_name)
 
 # Function to delete a model
 def delete_model(model_name):
-    os.system(f"ollama rm {model_name}")
-    st.success(f"Model '{model_name}' deleted successfully.")
+    ollama.delete(model_name)
 
-# Streamlit app layout
+# Function to chat with a model
+def chat_with_model(model_name, messages, system_prompt):
+    if system_prompt:
+        # Create a temporary model with the custom system prompt
+        modelfile = f"""
+        FROM {model_name}
+        SYSTEM "{system_prompt}"
+        """
+        temp_model_name = f"{model_name}_custom"
+        ollama.create(model=temp_model_name, modelfile=modelfile)
+        model_name = temp_model_name
+
+    response = ollama.chat(model=model_name, messages=messages)
+    return response
+
+# Streamlit app
 def main():
-    st.title("Ollama Streamlit App")
+    st.title("Ollama Chat Interface")
 
-    # Model management section
+    # Sidebar for model management
     st.sidebar.header("Model Management")
-    models = list_models()
     
-    # Download model
-    with st.sidebar.form(key='download_model'):
-        model_to_download = st.selectbox("Select model to download", models)
-        st.form_submit_button("Download Model", on_click=load_model, args=(model_to_download,))
+    if st.sidebar.button("List Models"):
+        models = list_models()
+        st.sidebar.write("Available Models:")
+        st.sidebar.write(models)
+
+    selected_model = st.sidebar.selectbox("Select a Model", options=list_models())
     
-    # Delete model
-    with st.sidebar.form(key='delete_model'):
-        model_to_delete = st.selectbox("Select model to delete", models)
-        st.form_submit_button("Delete Model", on_click=delete_model, args=(model_to_delete,))
+    if st.sidebar.button("Download Selected Model"):
+        download_model(selected_model)
+        st.sidebar.write(f"Model {selected_model} downloaded.")
     
-    # Chat interface
+    if st.sidebar.button("Delete Selected Model"):
+        delete_model(selected_model)
+        st.sidebar.write(f"Model {selected_model} deleted.")
+
+    # Main chat interface
     st.header("Chat with Model")
-    model_name = st.selectbox("Select Model", models)
-    custom_prompt = st.text_area("Custom System Prompt", "You are a helpful assistant.")
-    chat_history = st.session_state.get('chat_history', [])
     
-    user_input = st.text_input("Your message:")
+    if 'messages' not in st.session_state:
+        st.session_state.messages = []
     
-    if st.button("Send"):
-        if user_input:
-            st.session_state.chat_history.append({"role": "user", "content": user_input})
-            response = ollama.chat(model=model_name, messages=st.session_state.chat_history)
-            st.session_state.chat_history.append({"role": "assistant", "content": response['message']['content']})
-            st.experimental_rerun()
+    with st.form(key='chat_form'):
+        user_input = st.text_area("Enter your message:")
+        system_prompt = st.text_area("Enter a custom system prompt (optional):")
+        submit_button = st.form_submit_button(label='Send')
+        
+        if submit_button and user_input:
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            response = chat_with_model(selected_model, st.session_state.messages, system_prompt)
+            st.session_state.messages.append({"role": "assistant", "content": response['message']['content']})
     
-    st.subheader("Conversation")
-    for message in st.session_state.get('chat_history', []):
-        if message['role'] == 'user':
-            st.write(f"**User:** {message['content']}")
+    # Display chat history
+    for msg in st.session_state.messages:
+        if msg['role'] == 'user':
+            st.markdown(f"**You:** {msg['content']}")
         else:
-            st.write(f"**Assistant:** {message['content']}")
+            st.markdown(f"**Assistant:** {msg['content']}")
 
 if __name__ == "__main__":
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
     main()
